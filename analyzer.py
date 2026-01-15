@@ -58,14 +58,12 @@ def get_lot_to_panel_map(df: pd.DataFrame) -> dict:
     id_read_events = df[df['EventName'] == 'IDRead'][['timestamp', 'details.PanelID']].dropna(subset=['details.PanelID']).rename(columns={'details.PanelID': 'PanelID'})
     if start_events.empty or id_read_events.empty:
         return {}
-        
     start_events['timestamp'] = pd.to_datetime(start_events['timestamp'])
     id_read_events['timestamp'] = pd.to_datetime(id_read_events['timestamp'])
     merged_df = pd.merge_asof(id_read_events.sort_values('timestamp'), start_events.sort_values('timestamp'), on='timestamp', direction='backward')
     if 'LotID' not in merged_df.columns or merged_df['LotID'].isnull().all():
         return {}
     return merged_df.groupby('LotID')['PanelID'].unique().apply(list).to_dict()
-    
 
 def perform_eda(df: pd.DataFrame) -> dict:
     eda_results = {'event_counts': pd.Series(dtype='int64'), 'alarm_counts': pd.Series(dtype='int64'), 'alarm_table': pd.DataFrame()}
