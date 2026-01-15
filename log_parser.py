@@ -12,47 +12,53 @@ def _parse_s6f11_report(full_text: str) -> dict:
     lines = [line.strip() for line in full_text.split('\n') if line.strip()]
     if not lines: return {}
 
+    # Extract top-level DATAID and CEID from the first line
     top_level_values = _extract_values(lines[0])
     if len(top_level_values) >= 2:
         try:
             data['DATAID'] = int(top_level_values[0])
             data['CEID'] = int(top_level_values[1])
-        except (ValueError, IndexError):
-            return {}
-    else:
-        return {}
-    
+        except (ValueError, IndexError): return {}
+    else: return {}
+
     if "Alarm" in CEID_MAP.get(data['CEID'], ''): data['AlarmID'] = data['CEID']
     if data['CEID'] in [18, 113, 114]: data['AlarmID'] = data['CEID']
 
+    # Find the line containing a known RPTID and parse its subsequent block
     try:
-        rptid_index = -1
+        rptid_block_start_index = -1
         found_rptid = None
         for i, line in enumerate(lines):
             match = re.search(r"<U\d\s\[\d+\]\s(\d+)>", line)
             if match and int(match.group(1)) in RPTID_MAP:
                 found_rptid = int(match.group(1))
-                rptid_index = i
+                rptid_block_start_index = i
                 break
 
-        if found_rptid and rptid_index != -1:
+        if found_rptid and rptid_block_start_index != -1:
             data['RPTID'] = found_rptid
-            rptid_block_text = "\n".join(lines[rptid_index:])
-            all_values_in_block = _extract_values(rptid_block_text)
             
-            payload = all_values_in_block[1:]
+            # Find the opening '<L [...]>' tag that defines the RPTID's data block
+            block_start_line_index = -1
+            for i in range(rptid_block_start_index + 1, len(lines)):
+                if lines[i].startswith('<L'):
+                    block_start_line_index = i
+                    break
             
-            payload_filtered = [val for val in payload if not (isinstance(val, str) and len(val) >= 14 and val.isdigit())]
+            if block_start_line_index != -1:
+                rptid_block_text = "\n".join(lines[block_start_line_index:])
+                payload = _extract_values(rptid_block_text)
+                payload_filtered = [val for val in payload if not (isinstance(val, str) and len(val) >= 14 and val.isdigit())]
 
-            for i, name in enumerate(RPTID_MAP.get(found_rptid, [])):
-                if i < len(payload_filtered):
-                    data[name] = payload_filtered[i]
-            
-            if found_rptid == 101 and data.get('AlarmID') is None and len(payload_filtered) > 0:
-                 data['AlarmID'] = payload_filtered[0]
-            
+                for i, name in enumerate(RPTID_MAP.get(found_rptid, [])):
+                    if i < len(payload_filtered):
+                        data[name] = payload_filtered[i]
+                
+                if found_rptid == 101 and data.get('AlarmID') is None and len(payload_filtered) > 0:
+                    data['AlarmID'] = payload_filtered[0]
+
     except (StopIteration, ValueError, IndexError):
-        pass 
+        pass
 
     return data
 
@@ -61,12 +67,8 @@ def _parse_s2f49_command(full_text: str) -> dict:
     rcmd_match = re.search(r"<\s*A\s*\[\d+\]\s*'([A-Z_]{5,})'", full_text)
     if rcmd_match: data['RCMD'] = rcmd_match.group(1)
     
-    tokens = re.findall(r"'([^']*)'", full_text)
-    try:
-        if 'LOTID' in tokens:
-            lotid_index = tokens.index('LOTID')
-            if lotid_index + 1 < len(tokens): data['LotID'] = tokens[lotid_index + 1]
-    except (ValueError, IndexError): pass
+    lotid_match = re.search(r"'LOTID'\s*>\s*<A\s\[\d+\]\s'([^']*)'", full_text)
+    if lotid_match: data['LotID'] = lotid_match.group(1)
 
     panels_match = re.search(r"'LOTPANELS'\s*>\s*<L\s\[(\d+)\]", full_text, re.IGNORECASE)
     if panels_match: data['PanelCount'] = int(panels_match.group(1))
